@@ -31,6 +31,19 @@ export default function RootLayout({
       >
         <div id="confetti-portal" />
         {children}
+        <div className="fixed inset-x-0 bottom-5 text-center">
+          <p className="text-[10px] opacity-50 uppercase">
+            Visit on{" "}
+            <a
+              href="https://github.com/bnmwag/sudoku"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              github
+            </a>
+          </p>
+        </div>
       </body>
     </html>
   );
