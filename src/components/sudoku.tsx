@@ -1,6 +1,5 @@
 "use client";
 
-import confetti from "canvas-confetti";
 import {
   AnimatePresence,
   MotionConfig,
@@ -9,13 +8,14 @@ import {
   useReducedMotion,
 } from "motion/react";
 import type { FC } from "react";
-import { useEffect } from "react";
 import { useSudoku } from "@/hooks/use-sudoku";
 import { cn } from "@/lib/utils";
 import { SudokuDifficulty } from "./sudoku-difficulty";
+import { SudokuDone } from "./sudoku-done";
 import { SudokuGrid } from "./sudoku-grid";
 import { SudokuNumbers } from "./sudoku-numbers";
 import { SudokuSolveWithAi } from "./sudoku-solve-with-ai";
+import { SudokuTimer } from "./sudoku-timer";
 
 interface ISudokuProps extends React.HTMLAttributes<HTMLDivElement> {}
 
@@ -28,22 +28,8 @@ const SPRING: Transition = {
 
 export const Sudoku: FC<ISudokuProps> = (props) => {
   const { className, ...rest } = props;
-  const { newGame, gameActive, completedInMs, difficulty } = useSudoku();
+  const { newGame, gameActive, completedInMs } = useSudoku();
   const prefersReduced = useReducedMotion();
-
-  useEffect(() => {
-    if (completedInMs == null || prefersReduced) return;
-    confetti({ spread: 70, origin: { y: 0.6 } });
-    confetti({ particleCount: 120, angle: 60, spread: 55, origin: { x: 0 } });
-    confetti({ particleCount: 120, angle: 120, spread: 55, origin: { x: 1 } });
-  }, [completedInMs, prefersReduced]);
-
-  const formatTime = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    const mm = String(Math.floor(s / 60)).padStart(2, "0");
-    const ss = String(s % 60).padStart(2, "0");
-    return `${mm}:${ss}`;
-  };
 
   return (
     <MotionConfig
@@ -79,13 +65,66 @@ export const Sudoku: FC<ISudokuProps> = (props) => {
               }}
               transition={{ ...SPRING, duration: 0.5 }}
             >
-              <div className="mb-2 flex items-center justify-between">
-                <SudokuSolveWithAi />
-              </div>
-              <SudokuGrid />
-              <div className="mt-2 flex items-center justify-between">
-                <SudokuNumbers />
-              </div>
+              <AnimatePresence mode="wait">
+                {completedInMs == null ? (
+                  <motion.div
+                    key="game-content"
+                    initial={{
+                      clipPath: "circle(150% at 50% 50%)",
+                      filter: "blur(0px)",
+                      opacity: 1,
+                      scale: 1,
+                    }}
+                    animate={{
+                      clipPath: "circle(150% at 50% 50%)",
+                      filter: "blur(0px)",
+                      opacity: 1,
+                      scale: 1,
+                    }}
+                    exit={{
+                      clipPath: "circle(0% at 50% 50%)",
+                      filter: "blur(8px)",
+                      opacity: 0,
+                      scale: 0.98,
+                    }}
+                    transition={{ ...SPRING, duration: 0.5 }}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <SudokuSolveWithAi />
+                    </div>
+                    <SudokuGrid />
+                    <div className="mt-2 flex items-center justify-between">
+                      <SudokuNumbers />
+                      <SudokuTimer />
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="game-done"
+                    initial={{
+                      clipPath: "circle(0% at 50% 50%)",
+                      filter: "blur(8px)",
+                      opacity: 0,
+                      scale: 0.98,
+                    }}
+                    animate={{
+                      clipPath: "circle(150% at 50% 50%)",
+                      filter: "blur(0px)",
+                      opacity: 1,
+                      scale: 1,
+                    }}
+                    exit={{
+                      clipPath: "circle(0% at 50% 50%)",
+                      filter: "blur(8px)",
+                      opacity: 0,
+                      scale: 0.98,
+                    }}
+                    transition={{ ...SPRING, duration: 0.5 }}
+                  >
+                    <SudokuDone />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           ) : (
             <motion.div
@@ -116,48 +155,6 @@ export const Sudoku: FC<ISudokuProps> = (props) => {
                   Start game
                 </button>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <AnimatePresence>
-          {completedInMs != null && (
-            <motion.div
-              key="complete"
-              className="pointer-events-none absolute inset-0 grid place-items-center"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.28 }}
-            >
-              <motion.div
-                initial={{ backdropFilter: "blur(0px)" }}
-                animate={{ backdropFilter: "blur(6px)" }}
-                exit={{ backdropFilter: "blur(0px)" }}
-                className="absolute inset-0 bg-black/20 dark:bg-black/30"
-              />
-              <motion.div
-                className="pointer-events-auto relative z-10 rounded-xl border border-neutral-300/50 bg-background/80 px-4 py-3 text-sm shadow-lg dark:border-neutral-700/60"
-                initial={{ y: 8, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 8, opacity: 0 }}
-              >
-                <div className="mb-1 text-center">
-                  Completed on <span className="uppercase">{difficulty}</span>
-                </div>
-                <div className="mb-3 text-center text-lg font-medium">
-                  {formatTime(completedInMs)}
-                </div>
-                <div className="flex justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => newGame()}
-                    className="rounded-md border border-neutral-300 px-3 py-1.5 hover:bg-foreground hover:text-background dark:border-neutral-700"
-                  >
-                    New puzzle
-                  </button>
-                </div>
-              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>

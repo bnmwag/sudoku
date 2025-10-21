@@ -54,12 +54,8 @@ export const SudokuSolveWithAi: FC<Props> = ({
                 },
               }}
             >
-              <TextShimmer className="block tracking-wider">
-                Reasoning…
-              </TextShimmer>
-              <TextShimmer className="block tracking-wider">
-                Solving…
-              </TextShimmer>
+              <TextShimmer className="block font-mono">Reasoning…</TextShimmer>
+              <TextShimmer className="block font-mono">Solving…</TextShimmer>
             </TextLoop>
           </div>
 

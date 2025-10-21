@@ -42,6 +42,11 @@ export type SudokuState = {
  */
 export type SudokuActions = {
   /**
+   * Reset the game state to initial conditions. Used to reset after winning.
+   */
+  reset: () => void;
+
+  /**
    * Generate a new Sudoku puzzle, resetting timers and errors.
    * @param d Optional difficulty override; defaults to current `difficulty`.
    */
@@ -118,6 +123,21 @@ export const useSudokuStore = create<Store>()(
       gameActive: false,
       isAISolving: false,
       aiStatus: "idle",
+
+      reset: () => {
+        set({
+          cells: Array(81).fill("") as string[],
+          fixed: Array(81).fill(false),
+          errors: new Set<number>(),
+          active: null,
+          startAt: null,
+          completedInMs: null,
+          solution: null,
+          gameActive: false,
+          isAISolving: false,
+          aiStatus: "idle",
+        });
+      },
 
       newGame: (d) => {
         const diff = d ?? get().difficulty;
