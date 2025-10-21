@@ -237,3 +237,49 @@ export function computeConflicts(vals: string[]): Set<number> {
 
   return bad;
 }
+
+/**
+ * Box index 0..8 for a linear cell index.
+ * @param i Linear index (0..80).
+ */
+export const boxId = (i: number) =>
+  Math.floor(i / 27) * 3 + Math.floor((i % 9) / 3);
+
+/**
+ * Row index 0..8 for a linear cell index.
+ * @param i Linear index (0..80).
+ */
+export const rowId = (i: number) => Math.floor(i / 9);
+
+/**
+ * Column index 0..8 for a linear cell index.
+ * @param i Linear index (0..80).
+ */
+export const colId = (i: number) => i % 9;
+
+/**
+ * Higher score = more constrained = "smarter" to fill now.
+ * Counts how many peers in row/col/box are already filled.
+ *
+ * @param cells Current cell values.
+ * @param i Cell index to score.
+ * @returns Score 0..26.
+ */
+export const constraintScore = (cells: string[], i: number) => {
+  const r = rowId(i);
+  const c = colId(i);
+
+  let score = 0;
+
+  for (let x = 0; x < 9; x++) if (cells[r * 9 + x]) score++;
+  for (let x = 0; x < 9; x++) if (cells[x * 9 + c]) score++;
+
+  const br = Math.floor(r / 3) * 3;
+  const bc = Math.floor(c / 3) * 3;
+
+  for (let rr = 0; rr < 3; rr++)
+    for (let cc = 0; cc < 3; cc++) {
+      if (cells[(br + rr) * 9 + (bc + cc)]) score++;
+    }
+  return score;
+};

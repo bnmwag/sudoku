@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { SudokuDifficulty } from "./sudoku-difficulty";
 import { SudokuGrid } from "./sudoku-grid";
 import { SudokuNumbers } from "./sudoku-numbers";
+import { SudokuSolveWithAi } from "./sudoku-solve-with-ai";
 
 interface ISudokuProps extends React.HTMLAttributes<HTMLDivElement> {}
 
@@ -78,6 +79,9 @@ export const Sudoku: FC<ISudokuProps> = (props) => {
               }}
               transition={{ ...SPRING, duration: 0.5 }}
             >
+              <div className="mb-2 flex items-center justify-between">
+                <SudokuSolveWithAi />
+              </div>
               <SudokuGrid />
               <div className="mt-2 flex items-center justify-between">
                 <SudokuNumbers />

@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { nextAIMove } from "@/lib/sudoku-ai";
 import {
   computeConflicts,
   type Difficulty,
@@ -30,6 +31,10 @@ export type SudokuState = {
   solution?: string[] | null;
   /** True if a game is currently active (board visible). */
   gameActive: boolean;
+  /** True if the AI is currently solving the puzzle. */
+  isAISolving: boolean;
+  /** Status of the AI solver. */
+  aiStatus: "idle" | "thinking" | "solving" | "done";
 };
 
 /**
@@ -66,6 +71,21 @@ export type SudokuActions = {
    * @param d Difficulty preset.
    */
   setDifficulty: (d: Difficulty) => void;
+
+  /**
+   * Initiate AI solving of the puzzle.
+   * @param opts Optional animation and delay settings.
+   */
+  solveWithAI: (opts?: {
+    animate?: boolean;
+    delayMs?: number;
+    stepDelayMs?: number;
+  }) => void;
+
+  /**
+   * Cancel AI solving if it's in progress.
+   */
+  cancelAISolve: () => void;
 };
 
 /**
@@ -96,6 +116,8 @@ export const useSudokuStore = create<Store>()(
       completedInMs: null,
       solution: null,
       gameActive: false,
+      isAISolving: false,
+      aiStatus: "idle",
 
       newGame: (d) => {
         const diff = d ?? get().difficulty;
@@ -147,6 +169,80 @@ export const useSudokuStore = create<Store>()(
       },
 
       setDifficulty: (d) => set({ difficulty: d }),
+
+      cancelAISolve: () => set({ isAISolving: false, aiStatus: "idle" }),
+
+      solveWithAI: (opts?: { delayMs?: number; stepDelayMs?: number }) => {
+        const { solution, isAISolving } = get();
+        if (!solution || isAISolving) return;
+
+        const thinkDelay = opts?.delayMs ?? 600; // fake “thinking” pause
+        const stepDelay = opts?.stepDelayMs ?? 55; // 1-by-1 pacing
+
+        set({ isAISolving: true, aiStatus: "thinking" });
+
+        const thinkTimer = setTimeout(() => {
+          if (!get().isAISolving) return;
+          set({ aiStatus: "solving" });
+
+          const tick = () => {
+            if (!get().isAISolving) return;
+
+            const s = get();
+            if (!s.solution) return;
+
+            // If already identical to solution, wrap up.
+            const solved = s.cells.every((v, i) => v === s.solution?.[i]);
+            if (solved) {
+              const finished =
+                s.completedInMs == null && s.startAt != null
+                  ? Date.now() - s.startAt
+                  : s.completedInMs;
+
+              set({
+                completedInMs: finished ?? null,
+                isAISolving: false,
+                aiStatus: "done",
+                errors: toSet(computeConflicts(get().cells)),
+              });
+              return;
+            }
+
+            // Choose the next cell like a human would.
+            const move = nextAIMove(s.cells, s.fixed, s.solution);
+
+            // Safety: if no move (shouldn’t happen with a valid solution), snap to solved.
+            if (!move) {
+              const final = [...s.solution];
+              const errs = toSet(computeConflicts(final));
+              set({
+                cells: final,
+                errors: errs,
+                isAISolving: false,
+                aiStatus: "done",
+              });
+              return;
+            }
+
+            // Fill exactly one cell.
+            const next = [...s.cells];
+            next[move.index] = move.value;
+
+            const errs = toSet(computeConflicts(next));
+            set({ cells: next, errors: errs });
+
+            setTimeout(tick, stepDelay);
+          };
+
+          setTimeout(tick, stepDelay);
+        }, thinkDelay);
+
+        // Clean up the pending “think” timer if user cancels mid-way.
+        const unsub = useSudokuStore.subscribe((st) => {
+          if (!st.isAISolving) clearTimeout(thinkTimer);
+        });
+        setTimeout(() => unsub(), thinkDelay + 4000);
+      },
     }),
     {
       name: "sudoku-settings",
