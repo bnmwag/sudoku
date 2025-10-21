@@ -109,7 +109,44 @@ export function generatePuzzle(diff: Difficulty) {
   };
 }
 
-export function computeConflicts(vals: string[]) {
+export function computeConflicts(vals: string[]): Set<number> {
   const bad = new Set<number>();
+  const range = (n: number) => Array.from({ length: n }, (_, i) => i);
   const groups: number[][] = [];
+
+  for (let r = 0; r < 9; r++) groups.push(range(9).map((c) => r * 9 + c));
+
+  for (let c = 0; c < 9; c++) groups.push(range(9).map((r) => r * 9 + c));
+
+  for (let br = 0; br < 3; br++)
+    for (let bc = 0; bc < 3; bc++) {
+      const base = br * 27 + bc * 3;
+      groups.push([
+        base,
+        base + 1,
+        base + 2,
+        base + 9,
+        base + 10,
+        base + 11,
+        base + 18,
+        base + 19,
+        base + 20,
+      ]);
+    }
+
+  for (const g of groups) {
+    const seen = new Map<string, number[]>();
+    for (const idx of g) {
+      const v = vals[idx];
+      if (!v) continue;
+      if (!seen.has(v)) seen.set(v, [idx]);
+      else seen.get(v)?.push(idx);
+    }
+    for (const [, idxs] of seen)
+      if (idxs.length > 1) {
+        for (const i of idxs) bad.add(i);
+      }
+  }
+
+  return bad;
 }
