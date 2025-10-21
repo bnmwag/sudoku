@@ -1,6 +1,20 @@
+/**
+ * Difficulty presets that influence the number of given clues.
+ */
 export type Difficulty = "easy" | "medium" | "hard";
 
+/**
+ * Inclusive range helper: [0, n).
+ * @param n Upper bound (non-negative).
+ * @returns Array of indices from 0 to n-1.
+ */
 const range = (n: number) => Array.from({ length: n }, (_, i) => i);
+
+/**
+ * In-place Fisher–Yates shuffle (returns a new array).
+ * @param arr Input items.
+ * @returns Shuffled copy of the input.
+ */
 const shuffle = <T>(arr: T[]) => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -10,18 +24,42 @@ const shuffle = <T>(arr: T[]) => {
   return a;
 };
 
+/**
+ * Zero-based row index for a linear cell index.
+ * @param i Linear index (0..80).
+ */
 const row = (i: number) => Math.floor(i / 9);
+
+/**
+ * Zero-based column index for a linear cell index.
+ * @param i Linear index (0..80).
+ */
 const col = (i: number) => i % 9;
 
+/**
+ * Checks whether placing a value at a position is valid w.r.t. Sudoku rules.
+ * Expects `board` to use 0 for blanks and 1..9 for digits.
+ *
+ * @param board 81-cell board (row-major).
+ * @param i Linear index to test (0..80).
+ * @param val Digit 1..9 to try.
+ * @returns True if `val` can be placed at `i` without conflicts.
+ */
 function isSafe(board: number[], i: number, val: number) {
-  const r = row(i),
-    c = col(i);
+  const r = row(i);
+  const c = col(i);
+
+  // row / column checks
+
   for (let x = 0; x < 9; x++) {
     if (board[r * 9 + x] === val) return false;
     if (board[x * 9 + c] === val) return false;
   }
-  const br = Math.floor(r / 3) * 3,
-    bc = Math.floor(c / 3) * 3;
+
+  // 3x3 box checks
+  const br = Math.floor(r / 3) * 3;
+  const bc = Math.floor(c / 3) * 3;
+
   for (let rr = 0; rr < 3; rr++)
     for (let cc = 0; cc < 3; cc++) {
       if (board[(br + rr) * 9 + (bc + cc)] === val) return false;
@@ -29,6 +67,13 @@ function isSafe(board: number[], i: number, val: number) {
   return true;
 }
 
+/**
+ * Backtracking solver. Mutates `board` in place, filling 0s with digits.
+ * Uses randomized digit order to avoid deterministic patterns.
+ *
+ * @param board 81-cell board (0 = blank).
+ * @returns True if a complete solution was found.
+ */
 function solve(board: number[]): boolean {
   const idx = board.indexOf(0);
   if (idx === -1) return true;
@@ -42,6 +87,12 @@ function solve(board: number[]): boolean {
   return false;
 }
 
+/**
+ * Generates a fully solved Sudoku grid.
+ * The result is a 9×9 solution encoded as an 81-length number array.
+ *
+ * @returns Solved board where all entries are 1..9.
+ */
 export function generateSolved(): number[] {
   const board = Array(81).fill(0);
   for (let b = 0; b < 3; b++) {
@@ -58,6 +109,14 @@ export function generateSolved(): number[] {
   return board;
 }
 
+/**
+ * Counts the number of solutions for the given partially filled board.
+ * Uses backtracking with an early exit once `limit` is reached.
+ *
+ * @param board 81-cell board (0 = blank). Mutated during search.
+ * @param limit Maximum number of solutions to search for (default 2).
+ * @returns Number of solutions found up to `limit`.
+ */
 export function countSolutions(board: number[], limit = 2): number {
   let count = 0;
   function backtrack() {
@@ -80,6 +139,25 @@ export function countSolutions(board: number[], limit = 2): number {
   return count;
 }
 
+/**
+ * Structure returned by {@link generatePuzzle}.
+ */
+export interface GeneratedPuzzle {
+  /** Starting grid: strings "1".."9" or "" for blanks (length 81). */
+  puzzle: string[];
+  /** Which cells are given clues (same length as `puzzle`). */
+  fixed: boolean[];
+  /** The solved grid as strings (length 81). */
+  solution: string[];
+}
+
+/**
+ * Generates a puzzle by removing numbers from a solved grid while preserving
+ * uniqueness (exactly one solution). Clue counts depend on `diff`.
+ *
+ * @param diff Difficulty preset.
+ * @returns The puzzle, clue mask, and the full solution.
+ */
 export function generatePuzzle(diff: Difficulty) {
   const solved = generateSolved();
   const puzzle = [...solved];
@@ -109,6 +187,15 @@ export function generatePuzzle(diff: Difficulty) {
   };
 }
 
+/**
+ * Computes all conflicting cell indices in a partially filled grid according
+ * to Sudoku rules (row/column/box duplicates). Empty cells are ignored.
+ *
+ * Input is an array of strings so it can be used directly with UI state.
+ *
+ * @param vals Board values as strings: "1".."9" or "" (length 81).
+ * @returns A set of linear indices (0..80) that are in conflict.
+ */
 export function computeConflicts(vals: string[]): Set<number> {
   const bad = new Set<number>();
   const range = (n: number) => Array.from({ length: n }, (_, i) => i);

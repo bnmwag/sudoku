@@ -30,7 +30,6 @@ export const Sudoku: FC<ISudokuProps> = (props) => {
   const { newGame, gameActive, completedInMs, difficulty } = useSudoku();
   const prefersReduced = useReducedMotion();
 
-  // fire celebration when puzzle completes
   useEffect(() => {
     if (completedInMs == null || prefersReduced) return;
     confetti({ spread: 70, origin: { y: 0.6 } });
@@ -55,7 +54,6 @@ export const Sudoku: FC<ISudokuProps> = (props) => {
         style={{ perspective: 1200 }}
         {...rest}
       >
-        {/* Scene swap */}
         <AnimatePresence mode="wait" initial={false}>
           {gameActive ? (
             <motion.div
@@ -118,7 +116,6 @@ export const Sudoku: FC<ISudokuProps> = (props) => {
           )}
         </AnimatePresence>
 
-        {/* Completion overlay (always mounted listener) */}
         <AnimatePresence>
           {completedInMs != null && (
             <motion.div
@@ -150,7 +147,7 @@ export const Sudoku: FC<ISudokuProps> = (props) => {
                 <div className="flex justify-center gap-2">
                   <button
                     type="button"
-                    onClick={() => newGame()} // keeps same difficulty from store
+                    onClick={() => newGame()}
                     className="rounded-md border border-neutral-300 px-3 py-1.5 hover:bg-foreground hover:text-background dark:border-neutral-700"
                   >
                     New puzzle
