@@ -7,6 +7,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "biome check",
+    "test": "pnpm vitest",
     "format": "biome format --write"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "react-dom": "19.1.0",
     "tailwind-merge": "^3.3.1",
     "uuid": "^13.0.0",
+    "vitest": "^3.2.4",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
