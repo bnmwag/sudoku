@@ -2,8 +2,6 @@
 <br />
 <br />
 
-# Sudoku
-
 A simple sudoku game for keeping my brain working during some longer projects and not fully crashing out.
 It’s minimal, black & white, and way too over-engineered for something that’s basically “fill in some numbers.”
 
