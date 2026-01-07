@@ -68,26 +68,6 @@ function isSafe(board: number[], i: number, val: number) {
 }
 
 /**
- * Backtracking solver. Mutates `board` in place, filling 0s with digits.
- * Uses randomized digit order to avoid deterministic patterns.
- *
- * @param board 81-cell board (0 = blank).
- * @returns True if a complete solution was found.
- */
-function solve(board: number[]): boolean {
-  const idx = board.indexOf(0);
-  if (idx === -1) return true;
-  for (const v of shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9])) {
-    if (isSafe(board, idx, v)) {
-      board[idx] = v;
-      if (solve(board)) return true;
-      board[idx] = 0;
-    }
-  }
-  return false;
-}
-
-/**
  * Generates a fully solved Sudoku grid.
  * The result is a 9×9 solution encoded as an 81-length number array.
  *
@@ -95,17 +75,81 @@ function solve(board: number[]): boolean {
  */
 export function generateSolved(): number[] {
   const board = Array(81).fill(0);
-  for (let b = 0; b < 3; b++) {
-    const nums = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    const br = b * 3,
-      bc = b * 3;
-    let k = 0;
-    for (let r = 0; r < 3; r++)
-      for (let c = 0; c < 3; c++) {
-        board[(br + r) * 9 + (bc + c)] = nums[k++];
-      }
+
+  // Precompute peer lists for speed
+  const rowOf = (i: number) => Math.floor(i / 9);
+  const colOf = (i: number) => i % 9;
+  const boxTop = (r: number) => Math.floor(r / 3) * 3;
+  const boxLeft = (c: number) => Math.floor(c / 3) * 3;
+
+  const peers: number[][] = Array.from({ length: 81 }, (_, i) => {
+    const r = rowOf(i),
+      c = colOf(i);
+    const ps = new Set<number>();
+    for (let x = 0; x < 9; x++) {
+      ps.add(r * 9 + x);
+      ps.add(x * 9 + c);
+    }
+    const br = boxTop(r),
+      bc = boxLeft(c);
+    for (let rr = 0; rr < 3; rr++)
+      for (let cc = 0; cc < 3; cc++) ps.add((br + rr) * 9 + (bc + cc));
+    ps.delete(i);
+    return Array.from(ps);
+  });
+
+  const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+  function candidates(idx: number): number[] {
+    const used = new Set<number>();
+    for (const p of peers[idx]) {
+      const v = board[p];
+      if (v) used.add(v);
+    }
+    const opts = digits.filter((d) => !used.has(d));
+    return shuffle(opts);
   }
-  solve(board);
+
+  function nextIndex(): number {
+    // Choose the empty cell with the fewest candidates (MRV)
+    let bestIdx = -1;
+    let bestSize = 10;
+    for (let i = 0; i < 81; i++) {
+      if (board[i] !== 0) continue;
+      const opts = candidates(i);
+      const s = opts.length;
+      if (s < bestSize) {
+        bestSize = s;
+        bestIdx = i;
+        if (s <= 1) break; // early exit if very constrained
+      }
+    }
+    return bestIdx;
+  }
+
+  function fill(): boolean {
+    const idx = nextIndex();
+    if (idx === -1) return true; // solved
+    const opts = candidates(idx);
+    for (const v of opts) {
+      if (isSafe(board, idx, v)) {
+        board[idx] = v;
+        if (fill()) return true;
+        board[idx] = 0;
+      }
+    }
+    return false;
+  }
+
+  // Kick off with a randomized seed row to diversify solutions quickly
+  const firstRow = shuffle(digits);
+  for (let c = 0; c < 9; c++) board[c] = firstRow[c];
+
+  // If that seed leads to dead end (unlikely), clear and try again
+  if (!fill()) {
+    board.fill(0);
+    fill();
+  }
   return board;
 }
 
@@ -161,6 +205,8 @@ export interface GeneratedPuzzle {
 export function generatePuzzle(diff: Difficulty) {
   const solved = generateSolved();
   const puzzle = [...solved];
+
+  // Difficulty → target clue range
   const ranges: Record<Difficulty, [number, number]> = {
     easy: [36, 49],
     medium: [30, 35],
@@ -169,16 +215,70 @@ export function generatePuzzle(diff: Difficulty) {
   const [minClues, maxClues] = ranges[diff];
   const targetClues =
     Math.floor(Math.random() * (maxClues - minClues + 1)) + minClues;
-  const order = shuffle(range(81));
-  for (const idx of order) {
-    const backup = puzzle[idx];
-    if (backup === 0) continue;
-    puzzle[idx] = 0;
-    const temp = [...puzzle];
-    if (countSolutions(temp, 2) !== 1) puzzle[idx] = backup;
-    const cluesLeft = puzzle.filter((v) => v !== 0).length;
-    if (cluesLeft <= targetClues) break;
+
+  const clueCount = () => puzzle.reduce((n, v) => n + (v !== 0 ? 1 : 0), 0);
+
+  // 180° rotational symmetry pairing: i ↔ 80 - i
+  const pairs: Array<[number, number]> = [];
+  const used = new Set<number>();
+  const idxs = shuffle(range(81));
+  for (const i of idxs) {
+    if (used.has(i)) continue;
+    const j = 80 - i;
+    used.add(i);
+    used.add(j);
+    if (i === j)
+      pairs.push([i, j]); // center cell (i=40)
+    else pairs.push([i, j]);
   }
+
+  // Try removing symmetric pairs while maintaining uniqueness
+  for (const [a, b] of pairs) {
+    if (clueCount() <= targetClues) break;
+
+    const keepA = puzzle[a];
+    const keepB = puzzle[b];
+    if (keepA === 0 && keepB === 0) continue;
+
+    // Tentatively remove both (or just one, if same center cell)
+    puzzle[a] = 0;
+    if (a !== b) puzzle[b] = 0;
+
+    // Uniqueness check (early-exit 2-solution counter)
+    const temp = [...puzzle];
+    const unique = countSolutions(temp, 2) === 1;
+
+    // Respect lower bound too
+    if (!unique || clueCount() < targetClues) {
+      // revert
+      puzzle[a] = keepA;
+      if (a !== b) puzzle[b] = keepB;
+    }
+  }
+
+  // If still above target (uniqueness stopped us), do a single-cell cleanup pass without symmetry.
+  if (clueCount() > targetClues) {
+    const order = shuffle(range(81));
+    for (const i of order) {
+      if (clueCount() <= targetClues) break;
+      if (puzzle[i] === 0) continue;
+      const keep = puzzle[i];
+      puzzle[i] = 0;
+      const temp = [...puzzle];
+      if (countSolutions(temp, 2) !== 1) puzzle[i] = keep;
+    }
+  }
+
+  // Final guard: never below minClues (very unlikely with checks above)
+  if (clueCount() < minClues) {
+    // Add back random cells from solution until we reach minClues
+    const empties = shuffle(range(81).filter((i) => puzzle[i] === 0));
+    for (const i of empties) {
+      if (clueCount() >= minClues) break;
+      puzzle[i] = solved[i];
+    }
+  }
+
   const fixed = puzzle.map((v) => v !== 0);
   return {
     puzzle: puzzle.map((v) => (v ? String(v) : "")),
