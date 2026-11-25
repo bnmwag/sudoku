@@ -5,7 +5,14 @@ import type { ComponentProps, FC } from "react";
 import type { ICell } from "@/lib/sudoku-board";
 import { cn } from "@/lib/utils";
 
-export type CellHighlight = "selected" | "same" | "peer" | null;
+export type CellHighlight =
+  | "selected"
+  | "same"
+  | "peer"
+  | "hint-target"
+  | "hint-reason"
+  | "hint-area"
+  | null;
 
 interface ISudokuCellProps extends ComponentProps<"div"> {
   cell: ICell;
@@ -38,6 +45,9 @@ const HIGHLIGHT_CLASSES: Record<Exclude<CellHighlight, null>, string> = {
   selected: "bg-neutral-300 dark:bg-neutral-700",
   same: "bg-neutral-200 dark:bg-neutral-800",
   peer: "bg-neutral-100 dark:bg-neutral-900",
+  "hint-target": "bg-foreground",
+  "hint-reason": "bg-neutral-300 dark:bg-neutral-700",
+  "hint-area": "bg-neutral-100 dark:bg-neutral-900",
 };
 
 /**
@@ -63,10 +73,17 @@ export const SudokuCell: FC<ISudokuCellProps> = ({
   ...props
 }) => {
   const hasRipple = rippleDelay != null;
-  const markClass = (digit: number) =>
-    digit === focusDigit
-      ? "font-semibold text-foreground"
+  const inverted = highlight === "hint-target";
+  const markClass = (digit: number) => {
+    if (digit === focusDigit) {
+      return inverted
+        ? "font-semibold text-background"
+        : "font-semibold text-foreground";
+    }
+    return inverted
+      ? "text-neutral-400 dark:text-neutral-500"
       : "text-neutral-500 dark:text-neutral-400";
+  };
 
   return (
     <div
@@ -112,6 +129,7 @@ export const SudokuCell: FC<ISudokuCellProps> = ({
                   cell.given
                     ? "font-medium text-foreground"
                     : "text-neutral-500 dark:text-neutral-400",
+                  inverted && "text-background",
                   isError && !cell.given && "text-red-500 dark:text-red-400",
                   isError && cell.given && "text-red-600 dark:text-red-400",
                   hasRipple && "animate-bump motion-reduce:animate-none",

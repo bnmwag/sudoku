@@ -4,7 +4,6 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { vibrate } from "@/lib/haptics";
-import { nextAIMove } from "@/lib/sudoku-ai";
 import type { ICell, InputMode } from "@/lib/sudoku-board";
 import {
   applyDigit,
@@ -13,12 +12,12 @@ import {
   fillCandidates,
   getCellDistance,
   getCompletedUnits,
-  getValueStrings,
   INPUT_MODES,
   isSolved,
 } from "@/lib/sudoku-board";
 import type { Difficulty } from "@/lib/sudoku-helpers";
 import { generatePuzzle } from "@/lib/sudoku-helpers";
+import { getHint, type IHint } from "@/lib/sudoku-hint";
 import { getCol, getRow, UNITS } from "@/lib/sudoku-units";
 
 export type Screen = "menu" | "game" | "done";
@@ -53,6 +52,12 @@ export interface IRipple {
   delays: Record<number, number>;
 }
 
+/** Hint on screen, tied to the board it was computed for. */
+export interface IShownHint {
+  hint: IHint;
+  cells: ICell[];
+}
+
 /** Shake on cells that refused an input. */
 export interface IShake {
   id: number;
@@ -74,6 +79,7 @@ interface ISudokuState {
   ripple: IRipple | null;
   shake: IShake | null;
   aiStatus: AiStatus;
+  shownHint: IShownHint | null;
 }
 
 interface ISudokuActions {
@@ -101,7 +107,10 @@ interface ISudokuActions {
   redo: () => void;
   fillNotes: () => void;
   restart: () => void;
+  /** Shows the next hint, or applies it when one is already shown. */
   hint: () => void;
+  applyHint: () => void;
+  dismissHint: () => void;
   solveWithAi: () => void;
   cancelAi: () => void;
 }
@@ -127,6 +136,15 @@ let aiRunId = 0;
  */
 export const getElapsedMs = (game: IGame, now: number) =>
   game.elapsedMs + (game.resumedAt != null ? now - game.resumedAt : 0);
+
+/**
+ * The hint on screen, or null once the board has changed under it.
+ * @param state Store state.
+ */
+export const getShownHint = (state: ISudokuState) =>
+  state.shownHint && state.shownHint.cells === state.game?.cells
+    ? state.shownHint.hint
+    : null;
 
 /**
  * True when the board accepts player input.
@@ -284,6 +302,7 @@ export const useSudokuStore = create<SudokuStore>()(
         ripple: null,
         shake: null,
         aiStatus: "idle",
+        shownHint: null,
 
         finishHydration: () => {
           const { game } = get();
@@ -506,30 +525,42 @@ export const useSudokuStore = create<SudokuStore>()(
         hint: () => {
           const state = get();
           if (!isEditable(state) || !state.game) return;
+          if (getShownHint(state)) {
+            get().applyHint();
+            return;
+          }
+
           const { game } = state;
-
-          const move = nextAIMove(
-            getValueStrings(game.cells),
-            game.cells.map((c) => c.given),
-            game.solution.map(String),
-          );
-          if (!move) return;
-
-          const next = applyDigit(
-            game.cells,
-            [move.index],
-            Number(move.value),
-            "normal",
-            state.settings.autoClearNotes,
-          );
-          if (!next) return;
-
+          const hint = getHint(game.cells, game.solution);
+          if (!hint) return;
           set({
             game: { ...game, hintsUsed: game.hintsUsed + 1 },
-            selection: [move.index],
+            shownHint: { hint, cells: game.cells },
+            selection: [hint.index],
           });
-          commit(next, move.index);
+          vibrate(6);
         },
+
+        applyHint: () => {
+          const state = get();
+          const hint = getShownHint(state);
+          if (!isEditable(state) || !state.game || !hint) return;
+
+          const next =
+            hint.kind === "wrong"
+              ? eraseCells(state.game.cells, [hint.index])
+              : applyDigit(
+                  state.game.cells,
+                  [hint.index],
+                  hint.digit,
+                  "normal",
+                  state.settings.autoClearNotes,
+                );
+          set({ shownHint: null, selection: [hint.index] });
+          if (next) commit(next, hint.index);
+        },
+
+        dismissHint: () => set({ shownHint: null }),
 
         solveWithAi: () => {
           const state = get();
@@ -551,17 +582,14 @@ export const useSudokuStore = create<SudokuStore>()(
               return;
             }
 
-            const move = nextAIMove(
-              getValueStrings(game.cells),
-              game.cells.map((c) => c.given),
-              game.solution.map(String),
-            );
+            // Wrong digits get replaced straight away instead of cleared first.
+            const move = getHint(game.cells, game.solution);
             const next =
               move &&
               applyDigit(
                 game.cells,
                 [move.index],
-                Number(move.value),
+                game.solution[move.index],
                 "normal",
                 settings.autoClearNotes,
               );

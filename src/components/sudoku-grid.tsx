@@ -3,8 +3,9 @@
 import { AnimatePresence, motion } from "motion/react";
 import { type ComponentProps, type FC, type PointerEvent, useRef } from "react";
 
-import { useSudokuStore } from "@/hooks/use-sudoku-store";
+import { getShownHint, useSudokuStore } from "@/hooks/use-sudoku-store";
 import { getConflicts, getWrongCells } from "@/lib/sudoku-board";
+import { getHintCells } from "@/lib/sudoku-hint";
 import { BOXES, PEERS } from "@/lib/sudoku-units";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,7 @@ export const SudokuGrid: FC<ISudokuGridProps> = ({ className, ...props }) => {
   const extendSelection = useSudokuStore((s) => s.extendSelection);
   const selectDigit = useSudokuStore((s) => s.selectDigit);
   const resume = useSudokuStore((s) => s.resume);
+  const hint = useSudokuStore(getShownHint);
 
   const draggingRef = useRef(false);
   const lastTapRef = useRef<{ index: number; at: number } | null>(null);
@@ -51,16 +53,25 @@ export const SudokuGrid: FC<ISudokuGridProps> = ({ className, ...props }) => {
     : new Set<number>();
   const selected = new Set(selection);
   const cursor = selection.at(-1);
-  const focusDigit =
+  const hintCells = hint ? getHintCells(hint, game.cells) : null;
+  const sameDigit =
     cursor != null && settings.highlightSame
       ? game.cells[cursor].value || null
       : null;
+  const focusDigit = hint && hint.kind !== "wrong" ? hint.digit : sameDigit;
   const peers = new Set(
     selection.length === 1 && cursor != null ? PEERS[cursor] : [],
   );
   const shaking = new Set(shake?.cells);
 
   const getHighlight = (i: number): CellHighlight => {
+    if (hint && hintCells) {
+      if (i === hint.index) return "hint-target";
+      if (selected.has(i)) return "selected";
+      if (hintCells.reason.has(i)) return "hint-reason";
+      if (hintCells.area.has(i)) return "hint-area";
+      return null;
+    }
     if (selected.has(i)) return "selected";
     if (focusDigit && game.cells[i].value === focusDigit) return "same";
     if (peers.has(i)) return "peer";

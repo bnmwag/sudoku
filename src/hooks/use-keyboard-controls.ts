@@ -2,7 +2,11 @@
 
 import { useEffect } from "react";
 
-import { type Direction, useSudokuStore } from "@/hooks/use-sudoku-store";
+import {
+  type Direction,
+  getShownHint,
+  useSudokuStore,
+} from "@/hooks/use-sudoku-store";
 import { useWindowKeydown } from "@/hooks/use-window-keydown";
 import type { InputMode } from "@/lib/sudoku-board";
 
@@ -85,6 +89,7 @@ const onGameKeyDown = (e: KeyboardEvent) => {
 
   if (key === "escape") {
     if (store.aiStatus !== "idle") store.cancelAi();
+    else if (getShownHint(store)) store.dismissHint();
     else if (store.selection.length > 0) store.clearSelection();
     else store.openMenu();
     return;
@@ -95,6 +100,12 @@ const onGameKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
       store.resume();
     }
+    return;
+  }
+
+  if (key === "enter" && !onButton && getShownHint(store)) {
+    e.preventDefault();
+    store.applyHint();
     return;
   }
 

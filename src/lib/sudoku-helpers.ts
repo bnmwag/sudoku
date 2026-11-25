@@ -1,5 +1,3 @@
-import { getCol, getRow } from "@/lib/sudoku-units";
-
 /**
  * Difficulty presets that influence the number of given clues.
  */
@@ -339,30 +337,3 @@ export function computeConflicts(vals: string[]): Set<number> {
 
   return bad;
 }
-
-/**
- * Higher score = more constrained = "smarter" to fill now.
- * Counts how many peers in row/col/box are already filled.
- *
- * @param cells Current cell values.
- * @param i Cell index to score.
- * @returns Score 0..26.
- */
-export const constraintScore = (cells: string[], i: number) => {
-  const r = getRow(i);
-  const c = getCol(i);
-
-  let score = 0;
-
-  for (let x = 0; x < 9; x++) if (cells[r * 9 + x]) score++;
-  for (let x = 0; x < 9; x++) if (cells[x * 9 + c]) score++;
-
-  const br = Math.floor(r / 3) * 3;
-  const bc = Math.floor(c / 3) * 3;
-
-  for (let rr = 0; rr < 3; rr++)
-    for (let cc = 0; cc < 3; cc++) {
-      if (cells[(br + rr) * 9 + (bc + cc)]) score++;
-    }
-  return score;
-};

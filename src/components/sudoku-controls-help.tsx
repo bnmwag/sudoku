@@ -16,10 +16,10 @@ const CONTROLS: [keys: string, action: string][] = [
   ["Backspace / 0", "Erase"],
   ["Ctrl + Z / Ctrl + Shift + Z", "Undo / redo"],
   ["N", "Fill notes with every candidate"],
-  ["H", "Hint"],
+  ["H", "Hint, again or Enter to apply it"],
   ["I", "Solve with AI, again to stop"],
   ["P", "Pause"],
-  ["Esc", "Deselect, then back to the menu"],
+  ["Esc", "Close hint, deselect, then back to the menu"],
   ["M", "Menu"],
 ];
 
