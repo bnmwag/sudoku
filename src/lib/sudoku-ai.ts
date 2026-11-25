@@ -1,4 +1,5 @@
-import { boxId, colId, constraintScore, rowId } from "./sudoku-helpers";
+import { constraintScore } from "@/lib/sudoku-helpers";
+import { BOXES, COLS, PEERS, ROWS } from "@/lib/sudoku-units";
 
 /**
  * Reason why the AI selected a given move.
@@ -23,33 +24,6 @@ export interface AIMove {
   reason: AIReason;
 }
 
-/** Utility: 0..n-1 */
-const R = (n: number) => Array.from({ length: n }, (_, i) => i);
-
-/** Row/col/box unit indices for convenience. */
-const rows: number[][] = R(9).map((r) => R(9).map((c) => r * 9 + c));
-const cols: number[][] = R(9).map((c) => R(9).map((r) => r * 9 + c));
-const boxes: number[][] = R(9).map((b) => {
-  const br = Math.floor(b / 3) * 3;
-  const bc = (b % 3) * 3;
-  const out: number[] = [];
-  for (let r = 0; r < 3; r++)
-    for (let c = 0; c < 3; c++) out.push((br + r) * 9 + (bc + c));
-  return out;
-});
-
-/**
- * Precomputed peers (row ∪ col ∪ box, minus self).
- */
-const peers: number[][] = R(81).map((i) => {
-  const set = new Set<number>();
-  for (const p of rows[rowId(i)]) set.add(p);
-  for (const p of cols[colId(i)]) set.add(p);
-  for (const p of boxes[boxId(i)]) set.add(p);
-  set.delete(i);
-  return [...set];
-});
-
 type Cand = Set<number>;
 
 /**
@@ -65,7 +39,7 @@ export function computeCandidates(cells: string[]): Cand[] {
       continue;
     }
     const used = new Set<number>();
-    for (const p of peers[i]) if (cells[p]) used.add(Number(cells[p]));
+    for (const p of PEERS[i]) if (cells[p]) used.add(Number(cells[p]));
     const s = new Set<number>();
     for (let d = 1; d <= 9; d++) if (!used.has(d)) s.add(d);
     cand[i] = s;
@@ -111,7 +85,7 @@ export function nextAIMove(
   // rows
   for (let r = 0; r < 9; r++) {
     const where = new Map<number, number[]>();
-    for (const i of rows[r]) {
+    for (const i of ROWS[r]) {
       if (fixed[i] || cells[i]) continue;
       for (const v of cand[i]) {
         if (!where.has(v)) where.set(v, [i]);
@@ -129,7 +103,7 @@ export function nextAIMove(
   // 3) Hidden singles in columns
   for (let c = 0; c < 9; c++) {
     const where = new Map<number, number[]>();
-    for (const i of cols[c]) {
+    for (const i of COLS[c]) {
       if (fixed[i] || cells[i]) continue;
       for (const v of cand[i]) {
         if (!where.has(v)) where.set(v, [i]);
@@ -147,7 +121,7 @@ export function nextAIMove(
   // 4) Hidden singles in boxes
   for (let b = 0; b < 9; b++) {
     const where = new Map<number, number[]>();
-    for (const i of boxes[b]) {
+    for (const i of BOXES[b]) {
       if (fixed[i] || cells[i]) continue;
       for (const v of cand[i]) {
         if (!where.has(v)) where.set(v, [i]);

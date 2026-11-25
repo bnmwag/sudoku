@@ -1,3 +1,5 @@
+import { getCol, getRow } from "@/lib/sudoku-units";
+
 /**
  * Difficulty presets that influence the number of given clues.
  */
@@ -339,25 +341,6 @@ export function computeConflicts(vals: string[]): Set<number> {
 }
 
 /**
- * Box index 0..8 for a linear cell index.
- * @param i Linear index (0..80).
- */
-export const boxId = (i: number) =>
-  Math.floor(i / 27) * 3 + Math.floor((i % 9) / 3);
-
-/**
- * Row index 0..8 for a linear cell index.
- * @param i Linear index (0..80).
- */
-export const rowId = (i: number) => Math.floor(i / 9);
-
-/**
- * Column index 0..8 for a linear cell index.
- * @param i Linear index (0..80).
- */
-export const colId = (i: number) => i % 9;
-
-/**
  * Higher score = more constrained = "smarter" to fill now.
  * Counts how many peers in row/col/box are already filled.
  *
@@ -366,8 +349,8 @@ export const colId = (i: number) => i % 9;
  * @returns Score 0..26.
  */
 export const constraintScore = (cells: string[], i: number) => {
-  const r = rowId(i);
-  const c = colId(i);
+  const r = getRow(i);
+  const c = getCol(i);
 
   let score = 0;
 
