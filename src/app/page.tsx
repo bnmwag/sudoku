@@ -1,12 +1,12 @@
 import type { NextPage } from "next";
 import { Sudoku } from "@/components/sudoku";
 
-const indexPage: NextPage = () => {
+const IndexPage: NextPage = () => {
   return (
-    <main className="h-svh grid place-items-center">
+    <main className="grid min-h-svh place-items-center py-4">
       <Sudoku />
     </main>
   );
 };
 
-export default indexPage;
+export default IndexPage;

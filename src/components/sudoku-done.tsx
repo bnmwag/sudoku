@@ -1,88 +1,114 @@
 "use client";
 
-import type { FC } from "react";
+import type { ComponentProps, FC } from "react";
 import Confetti from "react-confetti";
 import { createPortal } from "react-dom";
-import { useSudoku } from "@/hooks/use-sudoku";
+
+import { useSudokuStore } from "@/hooks/use-sudoku-store";
+import { useWindowKeydown } from "@/hooks/use-window-keydown";
 import { useWindowSize } from "@/hooks/use-window-size";
+import { TEXT_BUTTON_CLASS } from "@/lib/class-names";
+import { cn, formatTime } from "@/lib/utils";
 
-export const SudokuDone: FC = () => {
-  const { difficulty, completedInMs, aiStatus, reset } = useSudoku();
+import { SparkleIcon } from "./icons";
+import { Kbd } from "./kbd";
+
+interface ISudokuDoneProps extends ComponentProps<"div"> {}
+
+/**
+ * Done screen shortcuts: Enter or N for the next puzzle, M or Escape for the menu.
+ * @param e Keyboard event.
+ */
+const onDoneKeyDown = (e: KeyboardEvent) => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  const store = useSudokuStore.getState();
+  const key = e.key.toLowerCase();
+  const onButton =
+    e.target instanceof HTMLElement && !!e.target.closest("button");
+
+  if ((key === "enter" && !onButton) || key === "n") {
+    store.newGame(store.game?.difficulty);
+  }
+  if (key === "m" || key === "escape") store.openMenu();
+};
+
+export const SudokuDone: FC<ISudokuDoneProps> = ({ className, ...props }) => {
+  const game = useSudokuStore((s) => s.game);
+  const newGame = useSudokuStore((s) => s.newGame);
+  const openMenu = useSudokuStore((s) => s.openMenu);
   const { width, height } = useWindowSize();
+  const portal =
+    typeof document !== "undefined"
+      ? document.getElementById("confetti-portal")
+      : null;
 
-  const withAi = aiStatus !== "idle";
+  useWindowKeydown(onDoneKeyDown);
 
-  const formatTime = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    const mm = String(Math.floor(s / 60)).padStart(2, "0");
-    const ss = String(s % 60).padStart(2, "0");
-    return `${mm}:${ss}`;
-  };
+  if (!game) return null;
+
+  const stats = [
+    { label: "Difficulty", value: game.difficulty },
+    { label: "Time", value: formatTime(game.elapsedMs) },
+    ...(game.hintsUsed > 0
+      ? [{ label: "Hints", value: String(game.hintsUsed) }]
+      : []),
+  ];
 
   return (
     <>
-      {createPortal(
-        <div className="fixed inset-0">
+      {portal &&
+        createPortal(
           <Confetti
-            className="fixed top-0 inset-0"
+            className="pointer-events-none fixed inset-0"
             width={width}
             height={height}
             colors={["#d4d4d4", "#404040", "#262626"]}
             numberOfPieces={250}
-          />
-        </div>,
-        document.getElementById("confetti-portal") as HTMLDivElement,
-      )}
-      <div className="w-[432px] text-sm">
-        <div className="mb-12">
-          <h1 className="uppercase text-sm">
-            Solved{" "}
-            <span className="opacity-50 inline-flex items-center gap-x-2">
-              {withAi ? (
-                <>
-                  with AI{" "}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 48 48"
-                  >
-                    {/* Icon from Health Icons by Resolve to Save Lives - https://github.com/resolvetosavelives/healthicons/blob/main/LICENSE */}
-                    <title>AI</title>
-                    <path
-                      fill="currentColor"
-                      d="M34 6c-1.368 4.944-3.13 6.633-8 8c4.87 1.367 6.632 3.056 8 8c1.368-4.944 3.13-6.633 8-8c-4.87-1.367-6.632-3.056-8-8m-14 8c-2.395 8.651-5.476 11.608-14 14c8.524 2.392 11.605 5.349 14 14c2.395-8.651 5.476-11.608 14-14c-8.524-2.392-11.605-5.349-14-14"
-                    />
-                  </svg>
-                </>
-              ) : null}
+            recycle={false}
+          />,
+          portal,
+        )}
+      <div
+        className={cn("w-[min(100vw_-_2rem,27rem)] text-sm", className)}
+        {...props}
+      >
+        <h1 className="mb-12 flex items-center gap-2 text-sm uppercase">
+          Solved
+          {game.usedAi && (
+            <span className="inline-flex items-center gap-1.5 opacity-50">
+              with AI <SparkleIcon />
             </span>
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="space-y-4">
-            <div className="space-y-0.5">
-              <div className="text-[10px] uppercase font-medium opacity-50">
-                Difficulty
+          )}
+        </h1>
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <dl className="space-y-4">
+            {stats.map((stat) => (
+              <div key={stat.label} className="space-y-0.5">
+                <dt className="text-[10px] font-medium uppercase opacity-50">
+                  {stat.label}
+                </dt>
+                <dd className="font-mono uppercase">{stat.value}</dd>
               </div>
-              <span className="uppercase">{difficulty}</span>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[10px] uppercase font-medium opacity-50">
-                Time
-              </div>
-              <span className="font-mono">
-                {formatTime(completedInMs ?? 0)}
-              </span>
-            </div>
+            ))}
+          </dl>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={() => newGame(game.difficulty)}
+              className={TEXT_BUTTON_CLASS}
+            >
+              Next puzzle
+              <Kbd>Enter</Kbd>
+            </button>
+            <button
+              type="button"
+              onClick={openMenu}
+              className={TEXT_BUTTON_CLASS}
+            >
+              Menu
+              <Kbd>M</Kbd>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => reset()}
-            className="cursor-pointer px-1.5 text-xs uppercase hover:bg-foreground hover:text-background"
-          >
-            Restart game
-          </button>
         </div>
       </div>
     </>

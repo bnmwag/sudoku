@@ -1,44 +1,32 @@
 "use client";
 
-import { type FC, useEffect, useState } from "react";
+import { type ComponentProps, type FC, useEffect, useState } from "react";
 
-import { useSudoku } from "@/hooks/use-sudoku";
+import { getElapsedMs, useSudokuStore } from "@/hooks/use-sudoku-store";
+import { cn, formatTime } from "@/lib/utils";
 
-export const SudokuTimer: FC = () => {
-  const { completedInMs, startAt } = useSudoku();
-  const [elapsed, setElapsed] = useState(0);
+interface ISudokuTimerProps extends ComponentProps<"span"> {}
 
-  // 🎉 Fire confetti once on completion
+export const SudokuTimer: FC<ISudokuTimerProps> = ({ className, ...props }) => {
+  const game = useSudokuStore((s) => s.game);
+  const [now, setNow] = useState(() => Date.now());
+  const isRunning = game?.resumedAt != null;
+
   useEffect(() => {
-    if (completedInMs != null) {
-    }
-  }, [completedInMs]);
-
-  // ⏱ Keep updating elapsed time while playing
-  useEffect(() => {
-    if (!startAt) return;
-
-    const tick = () => {
-      const now = Date.now();
-      const diff = completedInMs != null ? completedInMs : now - startAt;
-      setElapsed(diff);
-    };
-
-    tick(); // initial
-    const id = setInterval(tick, 1000);
+    if (!isRunning) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
-  }, [startAt, completedInMs]);
+  }, [isRunning]);
 
-  if (!startAt) return null;
-
-  const seconds = Math.floor(elapsed / 1000);
-  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
+  if (!game) return null;
 
   return (
-    <span className="ml-3 opacity-80 text-xs font-mono">
-      {completedInMs != null ? "Completed with " : ""}
-      {mm}:{ss}
+    <span
+      className={cn("font-mono text-xs tabular-nums", className)}
+      {...props}
+    >
+      {formatTime(getElapsedMs(game, now))}
     </span>
   );
 };

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Sudoku",
-  description: "A simple Sudoku game.",
+  description: "A minimal sudoku with corner and center marks.",
   icons: { icon: "/favicon.svg" },
 };
 
@@ -27,23 +27,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <div id="confetti-portal" />
         {children}
-        <div className="fixed inset-x-0 bottom-5 text-center">
-          <p className="text-[10px] opacity-50 uppercase">
-            Visit on{" "}
-            <a
-              href="https://github.com/bnmwag/sudoku"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline"
-            >
-              github
-            </a>
-          </p>
-        </div>
       </body>
     </html>
   );

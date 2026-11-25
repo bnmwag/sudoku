@@ -2,272 +2,599 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+
+import { vibrate } from "@/lib/haptics";
 import { nextAIMove } from "@/lib/sudoku-ai";
+import type { ICell, InputMode } from "@/lib/sudoku-board";
 import {
-  computeConflicts,
-  type Difficulty,
-  generatePuzzle,
-} from "@/lib/sudoku-helpers";
+  applyDigit,
+  createCells,
+  eraseCells,
+  fillCandidates,
+  getCellDistance,
+  getCompletedUnits,
+  getValueStrings,
+  INPUT_MODES,
+  isSolved,
+} from "@/lib/sudoku-board";
+import type { Difficulty } from "@/lib/sudoku-helpers";
+import { generatePuzzle } from "@/lib/sudoku-helpers";
+import { getCol, getRow, UNITS } from "@/lib/sudoku-units";
 
-/**
- * Reactive state for the Sudoku game board and metadata.
- */
-export type SudokuState = {
-  /** Current cell values as strings "1".."9" or "" for blank (81 length). */
-  cells: string[];
-  /** True for fixed clue cells that cannot be edited. */
-  fixed: boolean[];
-  /** Indices of cells that currently violate Sudoku rules. */
-  errors: Set<number>;
-  /** The currently active (focused) cell index, or null if none. */
-  active: number | null;
-  /** Difficulty preset of the current or next game. */
+export type Screen = "menu" | "game" | "done";
+export type Direction = "up" | "down" | "left" | "right";
+export type AiStatus = "idle" | "thinking" | "solving";
+
+export interface ISettings {
+  /** Mark digits that differ from the solution, not only rule breaks. */
+  showMistakes: boolean;
+  /** Highlight every cell holding the selected digit. */
+  highlightSame: boolean;
+  /** Placing a digit removes it from marks in the same row, column and box. */
+  autoClearNotes: boolean;
+}
+
+export interface IGame {
   difficulty: Difficulty;
-  /** Timestamp (ms) when the current game started, or null if none. */
-  startAt: number | null;
-  /** Time in milliseconds when the puzzle was completed, or null if unfinished. */
-  completedInMs: number | null;
-  /** Full solved grid for the current puzzle, if generated. */
-  solution?: string[] | null;
-  /** True if a game is currently active (board visible). */
-  gameActive: boolean;
-  /** True if the AI is currently solving the puzzle. */
-  isAISolving: boolean;
-  /** Status of the AI solver. */
-  aiStatus: "idle" | "thinking" | "solving" | "done";
+  cells: ICell[];
+  solution: number[];
+  /** Play time folded in at the last pause. */
+  elapsedMs: number;
+  /** When the clock last started, or null while paused. */
+  resumedAt: number | null;
+  status: "playing" | "won";
+  hintsUsed: number;
+  usedAi: boolean;
+}
+
+/** Staggered flash over a set of cells. `delays` maps cell index to ms. */
+export interface IRipple {
+  id: number;
+  delays: Record<number, number>;
+}
+
+/** Shake on cells that refused an input. */
+export interface IShake {
+  id: number;
+  cells: number[];
+}
+
+interface ISudokuState {
+  hydrated: boolean;
+  screen: Screen;
+  difficulty: Difficulty;
+  settings: ISettings;
+  game: IGame | null;
+  selection: number[];
+  mode: InputMode;
+  /** Mode forced by a held modifier key; wins over `mode` while set. */
+  heldMode: InputMode | null;
+  past: ICell[][];
+  future: ICell[][];
+  ripple: IRipple | null;
+  shake: IShake | null;
+  aiStatus: AiStatus;
+}
+
+interface ISudokuActions {
+  finishHydration: () => void;
+  setDifficulty: (difficulty: Difficulty) => void;
+  updateSettings: (settings: Partial<ISettings>) => void;
+  newGame: (difficulty?: Difficulty) => void;
+  continueGame: () => void;
+  openMenu: () => void;
+  pause: () => void;
+  resume: () => void;
+  togglePause: () => void;
+  select: (index: number, additive: boolean) => void;
+  extendSelection: (index: number) => void;
+  selectDigit: (digit: number) => void;
+  selectAll: () => void;
+  clearSelection: () => void;
+  moveSelection: (direction: Direction, extend: boolean) => void;
+  setMode: (mode: InputMode) => void;
+  cycleMode: () => void;
+  setHeldMode: (mode: InputMode | null) => void;
+  inputDigit: (digit: number, mode?: InputMode) => void;
+  erase: () => void;
+  undo: () => void;
+  redo: () => void;
+  fillNotes: () => void;
+  restart: () => void;
+  hint: () => void;
+  solveWithAi: () => void;
+  cancelAi: () => void;
+}
+
+type SudokuStore = ISudokuState & ISudokuActions;
+
+const HISTORY_LIMIT = 300;
+const RIPPLE_STEP_MS = 38;
+const WIN_RIPPLE_STEP_MS = 48;
+const DONE_SCREEN_DELAY_MS = 1400;
+/** Longest CSS effect (ripple, bump, shake) plus a little slack. */
+const EFFECT_DURATION_MS = 700;
+const AI_THINK_MS = 1200;
+const AI_STEP_MS = 55;
+
+let effectId = 0;
+let aiRunId = 0;
+
+/**
+ * Play time of a game at a given moment.
+ * @param game Current game.
+ * @param now Timestamp in ms.
+ */
+export const getElapsedMs = (game: IGame, now: number) =>
+  game.elapsedMs + (game.resumedAt != null ? now - game.resumedAt : 0);
+
+/**
+ * True when the board accepts player input.
+ * @param state Store state.
+ */
+const isEditable = (state: ISudokuState) =>
+  state.game?.status === "playing" &&
+  state.game.resumedAt != null &&
+  state.aiStatus === "idle";
+
+/**
+ * Builds a ripple that spreads outward from one cell.
+ * @param cells Cells to flash.
+ * @param origin Cell the ripple starts from.
+ * @param stepMs Delay per step of grid distance.
+ */
+const createRipple = (
+  cells: number[],
+  origin: number,
+  stepMs: number,
+): IRipple => {
+  const delays: Record<number, number> = {};
+  for (const i of cells) delays[i] = getCellDistance(origin, i) * stepMs;
+  return { id: ++effectId, delays };
 };
 
 /**
- * Actions for manipulating the Sudoku state.
+ * Wraps a cell index one step in a direction.
+ * @param index Cell index.
+ * @param direction Arrow direction.
  */
-export type SudokuActions = {
-  /**
-   * Reset the game state to initial conditions. Used to reset after winning.
-   */
-  reset: () => void;
-
-  /**
-   * Generate a new Sudoku puzzle, resetting timers and errors.
-   * @param d Optional difficulty override; defaults to current `difficulty`.
-   */
-  newGame: (d?: Difficulty) => void;
-
-  /**
-   * Set the active (focused) cell index.
-   * @param i Index 0..80, or null to clear focus.
-   */
-  setActive: (i: number | null) => void;
-
-  /**
-   * Insert a digit (1–9) into a cell, recomputing conflicts and completion state.
-   * @param i Cell index 0..80.
-   * @param v Value string "1".."9".
-   */
-  inputDigit: (i: number, v: string) => void;
-
-  /**
-   * Clear a cell value, recomputing conflicts.
-   * @param i Cell index 0..80.
-   */
-  clearCell: (i: number) => void;
-
-  /**
-   * Update the stored default difficulty level for future games.
-   * @param d Difficulty preset.
-   */
-  setDifficulty: (d: Difficulty) => void;
-
-  /**
-   * Initiate AI solving of the puzzle.
-   * @param opts Optional animation and delay settings.
-   */
-  solveWithAI: (opts?: {
-    animate?: boolean;
-    delayMs?: number;
-    stepDelayMs?: number;
-  }) => void;
-
-  /**
-   * Cancel AI solving if it's in progress.
-   */
-  cancelAISolve: () => void;
+const getNeighbor = (index: number, direction: Direction) => {
+  const r = getRow(index);
+  const c = getCol(index);
+  if (direction === "up") return ((r + 8) % 9) * 9 + c;
+  if (direction === "down") return ((r + 1) % 9) * 9 + c;
+  if (direction === "left") return r * 9 + ((c + 8) % 9);
+  return r * 9 + ((c + 1) % 9);
 };
 
-/**
- * Combined Sudoku store type containing both state and actions.
- */
-type Store = SudokuState & SudokuActions;
-
-/**
- * Ensures that the provided input is a `Set<number>`, coercing arrays if necessary.
- * @param x Unknown value, possibly from persisted JSON.
- */
-const toSet = (x: unknown): Set<number> =>
-  x instanceof Set ? x : new Set(Array.isArray(x) ? (x as number[]) : []);
-
-/**
- * Zustand store that holds Sudoku game state and logic.
- * Persists only the difficulty setting to localStorage.
- */
-export const useSudokuStore = create<Store>()(
+export const useSudokuStore = create<SudokuStore>()(
   persist(
-    (set, get) => ({
-      cells: Array(81).fill("") as string[],
-      fixed: Array(81).fill(false),
-      errors: new Set<number>(),
-      active: null,
-      difficulty: "easy",
-      startAt: null,
-      completedInMs: null,
-      solution: null,
-      gameActive: false,
-      isAISolving: false,
-      aiStatus: "idle",
+    (set, get) => {
+      /**
+       * Starts a ripple and clears it once every cell has finished animating.
+       * @param cells Cells to flash.
+       * @param origin Cell the ripple starts from.
+       * @param stepMs Delay per step of grid distance.
+       */
+      const playRipple = (cells: number[], origin: number, stepMs: number) => {
+        const ripple = createRipple(cells, origin, stepMs);
+        const longest = Math.max(0, ...Object.values(ripple.delays));
+        set({ ripple });
+        // Unmount the effect once it has played so later renders don't replay it.
+        setTimeout(() => {
+          if (get().ripple?.id === ripple.id) set({ ripple: null });
+        }, longest + EFFECT_DURATION_MS);
+      };
 
-      reset: () => {
+      /**
+       * Writes new cells with history, then plays completion feedback or wins.
+       * @param next New board cells.
+       * @param origin Cell the change came from, used for ripples.
+       * @param haptics Vibrate on change.
+       */
+      const commit = (next: ICell[], origin: number, haptics = true) => {
+        const { game, past } = get();
+        if (!game) return;
+
+        const before = getCompletedUnits(game.cells);
+        const completed = [...getCompletedUnits(next)]
+          .filter((u) => !before.has(u))
+          .flatMap((u) => UNITS[u]);
+
         set({
-          cells: Array(81).fill("") as string[],
-          fixed: Array(81).fill(false),
-          errors: new Set<number>(),
-          active: null,
-          startAt: null,
-          completedInMs: null,
-          solution: null,
-          gameActive: false,
-          isAISolving: false,
+          game: { ...game, cells: next },
+          past: [...past, game.cells].slice(-HISTORY_LIMIT),
+          future: [],
+        });
+
+        if (isSolved(next, game.solution)) {
+          win(origin);
+          return;
+        }
+        if (completed.length > 0) {
+          playRipple(completed, origin, RIPPLE_STEP_MS);
+          if (haptics) vibrate([10, 50, 14]);
+          return;
+        }
+        if (haptics) vibrate(6);
+      };
+
+      /**
+       * Stops the clock, plays the board-wide ripple, then shows the done screen.
+       * @param origin Cell of the final move.
+       */
+      const win = (origin: number) => {
+        const { game } = get();
+        if (!game) return;
+
+        aiRunId++;
+        set({
+          game: {
+            ...game,
+            status: "won",
+            elapsedMs: getElapsedMs(game, Date.now()),
+            resumedAt: null,
+          },
+          selection: [],
+          heldMode: null,
           aiStatus: "idle",
         });
-      },
+        playRipple(
+          Array.from({ length: 81 }, (_, i) => i),
+          origin,
+          WIN_RIPPLE_STEP_MS,
+        );
+        vibrate([16, 60, 16, 60, 40]);
 
-      newGame: (d) => {
-        const diff = d ?? get().difficulty;
-        const { puzzle, fixed, solution } = generatePuzzle(diff);
-        set({
-          difficulty: diff,
-          cells: puzzle,
-          fixed,
-          solution,
-          errors: new Set(),
-          active: null,
-          startAt: Date.now(),
-          completedInMs: null,
-          gameActive: true,
-        });
-      },
+        setTimeout(() => {
+          if (get().game?.status === "won" && get().screen === "game") {
+            set({ screen: "done" });
+          }
+        }, DONE_SCREEN_DELAY_MS);
+      };
 
-      setActive: (i) => set({ active: i }),
+      /**
+       * Shakes cells that could not take the last input.
+       * @param cells Cells to shake.
+       */
+      const refuse = (cells: number[]) => {
+        const shake = { id: ++effectId, cells };
+        set({ shake });
+        vibrate([8, 40, 8]);
+        setTimeout(() => {
+          if (get().shake?.id === shake.id) set({ shake: null });
+        }, EFFECT_DURATION_MS);
+      };
 
-      inputDigit: (i, v) => {
-        const { cells, fixed, startAt, completedInMs } = get();
-        if (fixed[i]) return; // ignore edits to clues
+      return {
+        hydrated: false,
+        screen: "menu",
+        difficulty: "easy",
+        settings: {
+          showMistakes: false,
+          highlightSame: true,
+          autoClearNotes: true,
+        },
+        game: null,
+        selection: [],
+        mode: "normal",
+        heldMode: null,
+        past: [],
+        future: [],
+        ripple: null,
+        shake: null,
+        aiStatus: "idle",
 
-        const next = [...cells];
-        next[i] = v;
+        finishHydration: () => {
+          const { game } = get();
+          // The clock was folded at the last pause; anything after that is lost on purpose.
+          set({
+            hydrated: true,
+            game: game ? { ...game, resumedAt: null } : null,
+          });
+        },
 
-        const bad = toSet(computeConflicts(next));
-        let done: number | null = null;
+        setDifficulty: (difficulty) => set({ difficulty }),
 
-        // check for completion
-        if (
-          next.every((x) => x !== "") &&
-          bad.size === 0 &&
-          completedInMs == null &&
-          startAt != null
-        ) {
-          done = Date.now() - startAt;
-        }
+        updateSettings: (settings) =>
+          set({ settings: { ...get().settings, ...settings } }),
 
-        set({ cells: next, errors: bad, completedInMs: done ?? null });
-      },
+        newGame: (difficulty) => {
+          const d = difficulty ?? get().difficulty;
+          const { puzzle, solution } = generatePuzzle(d);
+          aiRunId++;
+          set({
+            difficulty: d,
+            screen: "game",
+            game: {
+              difficulty: d,
+              cells: createCells(puzzle),
+              solution: solution.map(Number),
+              elapsedMs: 0,
+              resumedAt: Date.now(),
+              status: "playing",
+              hintsUsed: 0,
+              usedAi: false,
+            },
+            selection: [],
+            heldMode: null,
+            past: [],
+            future: [],
+            ripple: null,
+            shake: null,
+            aiStatus: "idle",
+          });
+        },
 
-      clearCell: (i) => {
-        const { cells } = get();
-        const next = [...cells];
-        next[i] = "";
-        const bad = toSet(computeConflicts(next));
-        set({ cells: next, errors: bad });
-      },
+        continueGame: () => {
+          if (get().game?.status !== "playing") return;
+          set({ screen: "game" });
+          get().resume();
+        },
 
-      setDifficulty: (d) => set({ difficulty: d }),
+        openMenu: () => {
+          get().cancelAi();
+          get().pause();
+          set({ screen: "menu", heldMode: null });
+        },
 
-      cancelAISolve: () => set({ isAISolving: false, aiStatus: "idle" }),
+        pause: () => {
+          const { game } = get();
+          if (game?.status !== "playing" || game.resumedAt == null) return;
+          set({
+            game: {
+              ...game,
+              elapsedMs: getElapsedMs(game, Date.now()),
+              resumedAt: null,
+            },
+            heldMode: null,
+          });
+        },
 
-      solveWithAI: (opts?: { delayMs?: number; stepDelayMs?: number }) => {
-        const { solution, isAISolving } = get();
-        if (!solution || isAISolving) return;
+        resume: () => {
+          const { game } = get();
+          if (game?.status !== "playing" || game.resumedAt != null) return;
+          set({ game: { ...game, resumedAt: Date.now() } });
+        },
 
-        const thinkDelay = opts?.delayMs ?? 600; // fake “thinking” pause
-        const stepDelay = opts?.stepDelayMs ?? 55; // 1-by-1 pacing
+        togglePause: () => {
+          const { game } = get();
+          if (game?.resumedAt == null) get().resume();
+          else get().pause();
+        },
 
-        set({ isAISolving: true, aiStatus: "thinking" });
+        select: (index, additive) => {
+          const { selection } = get();
+          if (!additive) {
+            set({ selection: [index] });
+            return;
+          }
+          set({
+            selection: selection.includes(index)
+              ? selection.filter((i) => i !== index)
+              : [...selection, index],
+          });
+        },
 
-        const thinkTimer = setTimeout(() => {
-          if (!get().isAISolving) return;
-          set({ aiStatus: "solving" });
+        extendSelection: (index) => {
+          const { selection } = get();
+          if (selection.includes(index)) return;
+          set({ selection: [...selection, index] });
+        },
 
-          const tick = () => {
-            if (!get().isAISolving) return;
+        selectDigit: (digit) => {
+          const { game } = get();
+          if (!game || digit === 0) return;
+          const matches = game.cells
+            .map((c, i) => (c.value === digit ? i : -1))
+            .filter((i) => i !== -1);
+          if (matches.length > 0) set({ selection: matches });
+        },
 
-            const s = get();
-            if (!s.solution) return;
+        selectAll: () =>
+          set({ selection: Array.from({ length: 81 }, (_, i) => i) }),
 
-            // If already identical to solution, wrap up.
-            const solved = s.cells.every((v, i) => v === s.solution?.[i]);
-            if (solved) {
-              const finished =
-                s.completedInMs == null && s.startAt != null
-                  ? Date.now() - s.startAt
-                  : s.completedInMs;
+        clearSelection: () => set({ selection: [] }),
 
-              set({
-                completedInMs: finished ?? null,
-                isAISolving: false,
-                aiStatus: "done",
-                errors: toSet(computeConflicts(get().cells)),
-              });
+        moveSelection: (direction, extend) => {
+          const { selection } = get();
+          const cursor = selection.at(-1);
+          if (cursor == null) {
+            set({ selection: [40] });
+            return;
+          }
+          const next = getNeighbor(cursor, direction);
+          set({
+            selection: extend
+              ? [...selection.filter((i) => i !== next), next]
+              : [next],
+          });
+        },
+
+        setMode: (mode) => set({ mode }),
+
+        cycleMode: () => {
+          const { mode } = get();
+          const index = INPUT_MODES.indexOf(mode);
+          set({ mode: INPUT_MODES[(index + 1) % INPUT_MODES.length] });
+        },
+
+        setHeldMode: (heldMode) => {
+          if (get().heldMode !== heldMode) set({ heldMode });
+        },
+
+        inputDigit: (digit, mode) => {
+          const state = get();
+          if (!isEditable(state) || !state.game) return;
+          if (state.selection.length === 0) return;
+
+          const next = applyDigit(
+            state.game.cells,
+            state.selection,
+            digit,
+            mode ?? state.heldMode ?? state.mode,
+            state.settings.autoClearNotes,
+          );
+          if (!next) {
+            refuse(state.selection);
+            return;
+          }
+          commit(next, state.selection.at(-1) ?? 0);
+        },
+
+        erase: () => {
+          const state = get();
+          if (!isEditable(state) || !state.game) return;
+          if (state.selection.length === 0) return;
+
+          const next = eraseCells(state.game.cells, state.selection);
+          if (!next) {
+            refuse(state.selection);
+            return;
+          }
+          commit(next, state.selection.at(-1) ?? 0);
+        },
+
+        undo: () => {
+          const state = get();
+          const previous = state.past.at(-1);
+          if (!isEditable(state) || !state.game || !previous) return;
+          set({
+            game: { ...state.game, cells: previous },
+            past: state.past.slice(0, -1),
+            future: [state.game.cells, ...state.future],
+          });
+          vibrate(6);
+        },
+
+        redo: () => {
+          const state = get();
+          const following = state.future[0];
+          if (!isEditable(state) || !state.game || !following) return;
+          set({
+            game: { ...state.game, cells: following },
+            past: [...state.past, state.game.cells],
+            future: state.future.slice(1),
+          });
+          vibrate(6);
+        },
+
+        fillNotes: () => {
+          const state = get();
+          if (!isEditable(state) || !state.game) return;
+          commit(
+            fillCandidates(state.game.cells),
+            state.selection.at(-1) ?? 40,
+          );
+          playRipple(
+            state.game.cells.flatMap((c, i) => (c.value ? [] : [i])),
+            state.selection.at(-1) ?? 40,
+            RIPPLE_STEP_MS / 2,
+          );
+        },
+
+        restart: () => {
+          const state = get();
+          if (!isEditable(state) || !state.game) return;
+          const cleared = state.game.cells.map((c) =>
+            c.given ? c : { ...c, value: 0, corner: [], center: [] },
+          );
+          commit(cleared, 40);
+          set({ selection: [] });
+        },
+
+        hint: () => {
+          const state = get();
+          if (!isEditable(state) || !state.game) return;
+          const { game } = state;
+
+          const move = nextAIMove(
+            getValueStrings(game.cells),
+            game.cells.map((c) => c.given),
+            game.solution.map(String),
+          );
+          if (!move) return;
+
+          const next = applyDigit(
+            game.cells,
+            [move.index],
+            Number(move.value),
+            "normal",
+            state.settings.autoClearNotes,
+          );
+          if (!next) return;
+
+          set({
+            game: { ...game, hintsUsed: game.hintsUsed + 1 },
+            selection: [move.index],
+          });
+          commit(next, move.index);
+        },
+
+        solveWithAi: () => {
+          const state = get();
+          if (!isEditable(state) || !state.game) return;
+
+          const runId = ++aiRunId;
+          set({
+            aiStatus: "thinking",
+            selection: [],
+            game: { ...state.game, usedAi: true },
+          });
+
+          const step = () => {
+            const { game, aiStatus, settings } = get();
+            if (runId !== aiRunId || aiStatus === "idle") return;
+            if (!game || game.status !== "playing") return;
+            if (game.resumedAt == null) {
+              setTimeout(step, AI_STEP_MS * 4);
               return;
             }
 
-            // Choose the next cell like a human would.
-            const move = nextAIMove(s.cells, s.fixed, s.solution);
-
-            // Safety: if no move (shouldn’t happen with a valid solution), snap to solved.
-            if (!move) {
-              const final = [...s.solution];
-              const errs = toSet(computeConflicts(final));
-              set({
-                cells: final,
-                errors: errs,
-                isAISolving: false,
-                aiStatus: "done",
-              });
+            const move = nextAIMove(
+              getValueStrings(game.cells),
+              game.cells.map((c) => c.given),
+              game.solution.map(String),
+            );
+            const next =
+              move &&
+              applyDigit(
+                game.cells,
+                [move.index],
+                Number(move.value),
+                "normal",
+                settings.autoClearNotes,
+              );
+            if (!move || !next) {
+              set({ aiStatus: "idle" });
               return;
             }
 
-            // Fill exactly one cell.
-            const next = [...s.cells];
-            next[move.index] = move.value;
-
-            const errs = toSet(computeConflicts(next));
-            set({ cells: next, errors: errs });
-
-            setTimeout(tick, stepDelay);
+            set({ aiStatus: "solving" });
+            commit(next, move.index, false);
+            setTimeout(step, AI_STEP_MS);
           };
 
-          setTimeout(tick, stepDelay);
-        }, thinkDelay);
+          setTimeout(step, AI_THINK_MS);
+        },
 
-        // Clean up the pending “think” timer if user cancels mid-way.
-        const unsub = useSudokuStore.subscribe((st) => {
-          if (!st.isAISolving) clearTimeout(thinkTimer);
-        });
-        setTimeout(() => unsub(), thinkDelay + 4000);
-      },
-    }),
+        cancelAi: () => {
+          aiRunId++;
+          if (get().aiStatus !== "idle") set({ aiStatus: "idle" });
+        },
+      };
+    },
     {
-      name: "sudoku-settings",
+      name: "sudoku",
+      version: 1,
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ difficulty: state.difficulty }),
+      skipHydration: true,
+      partialize: (state) => ({
+        difficulty: state.difficulty,
+        settings: state.settings,
+        mode: state.mode,
+        game: state.game,
+      }),
     },
   ),
 );
